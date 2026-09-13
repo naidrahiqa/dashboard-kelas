@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -50,18 +51,23 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // Fallback buat HP di bawah Android 12: hijau khas app sekolah
 private val LightGreenScheme = lightColorScheme(
@@ -105,6 +111,10 @@ fun App(prefs: SharedPreferences) {
     var editTarget by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var showBulk by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
+    var showRollResult by remember { mutableStateOf(false) }
+    var rollResultSeats by remember { mutableStateOf<Seats?>(null) }
+    var isShuffling by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     fun simpan(s: Seats, p: Int = period) {
         seats = s
@@ -115,7 +125,7 @@ fun App(prefs: SharedPreferences) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Tekajeduwa") },
+                title = { Text("Dashboard Kelas") },
                 actions = {
                     IconButton(onClick = { showBulk = true }) {
                         Icon(Icons.Filled.Edit, contentDescription = "Isi nama cepat")
@@ -135,16 +145,67 @@ fun App(prefs: SharedPreferences) {
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Button(
-                    onClick = { simpan(rollSeats(seats, period % 2 == 1), period + 1) },
+                    onClick = {
+                        val hasil = rollSeats(seats)
+                        simpan(hasil, period + 1)
+                        rollResultSeats = hasil
+                        showRollResult = true
+                    },
                     modifier = Modifier.weight(1.4f).height(48.dp),
                     shape = RoundedCornerShape(14.dp),
                 ) { Text("Rolling Periode") }
 
                 FilledTonalButton(
-                    onClick = { simpan(shuffleSeats(seats)) },
+                    onClick = {
+                        if (!isShuffling && seats.flatten().any { it != null }) {
+                            isShuffling = true
+                            scope.launch {
+                                val names = seats.flatten().filterNotNull().map { it.nama }
+                                val startSeats = seats
+                                val endSeats = shuffleSeats(seats)
+                                // animasi pura-pura acak selama ~3 detik
+                                val totalFrames = 18
+                                val frameDelay = 170L // ~3 detik total
+                                for (frame in 0 until totalFrames) {
+                                    seats = if (frame < totalFrames - 1) {
+                                        // frame acak: random positions buat visual
+                                        val shuffled = names.shuffled()
+                                        var idx = 0
+                                        startSeats.map { col ->
+                                            col.map { s ->
+                                                if (s != null && idx < shuffled.size) {
+                                                    Siswa(newId(), shuffled[idx++])
+                                                } else if (s != null) {
+                                                    s
+                                                } else {
+                                                    null
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        endSeats
+                                    }
+                                    delay(frameDelay)
+                                }
+                                simpan(endSeats)
+                                isShuffling = false
+                            }
+                        }
+                    },
+                    enabled = !isShuffling,
                     modifier = Modifier.weight(1f).height(48.dp),
                     shape = RoundedCornerShape(14.dp),
-                ) { Text("Acak") }
+                ) {
+                    if (isShuffling) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.height(20.dp).width(20.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    } else {
+                        Text("Acak")
+                    }
+                }
             }
         },
     ) { inner ->
@@ -180,55 +241,75 @@ fun App(prefs: SharedPreferences) {
                 shape = RoundedCornerShape(24.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(Modifier.padding(14.dp)) {
-                    Text(
-                        "DEPAN KELAS",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                Box {
+                    Column(Modifier.padding(14.dp)) {
+                        Text(
+                            "DEPAN KELAS",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
 
-                    Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(8.dp))
 
-                    // Header barisan
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        Spacer(Modifier.width(22.dp))
-                        COLUMN_SIZES.indices.forEach { c ->
-                            Text(
-                                "B${c + 1}",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.weight(1f),
-                            )
+                        // Header barisan
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            Spacer(Modifier.width(22.dp))
+                            COLUMN_SIZES.indices.forEach { c ->
+                                Text(
+                                    "B${c + 1}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
                         }
-                    }
 
-                    Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(8.dp))
 
-                    // Grid kursi
-                    for (d in 0 until MAX_DEPTH) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Text(
-                                "${d + 1}",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier.width(22.dp),
-                            )
-                            seats.forEachIndexed { c, col ->
-                                Box(Modifier.weight(1f).padding(horizontal = 3.dp)) {
-                                    if (d < col.size) {
-                                        SeatCell(siswa = col[d], onClick = { editTarget = c to d })
+                        // Grid kursi
+                        for (d in 0 until MAX_DEPTH) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "${d + 1}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier.width(22.dp),
+                                )
+                                seats.forEachIndexed { c, col ->
+                                    Box(Modifier.weight(1f).padding(horizontal = 3.dp)) {
+                                        if (d < col.size) {
+                                            SeatCell(
+                                                siswa = col[d],
+                                                onClick = { if (!isShuffling) editTarget = c to d },
+                                            )
+                                        }
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    // overlay acak
+                    if (isShuffling) {
+                        Box(
+                            modifier = Modifier
+                                .matchParentSize()
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.height(40.dp).width(40.dp),
+                                strokeWidth = 3.dp,
+                            )
                         }
                     }
                 }
@@ -236,10 +317,9 @@ fun App(prefs: SharedPreferences) {
 
             Spacer(Modifier.height(10.dp))
             Text(
-                "Ketuk kursi untuk mengisi nama. Tiap periode semua maju dengan " +
-                    "nyerong: arah kanan-kiri bergantian tiap periode supaya " +
-                    "semua siswa keliling seluruh barisan. Paling depan pindah " +
-                    "ke paling belakang.",
+                "Ketuk kursi untuk mengisi nama. Tiap periode semua siswa " +
+                    "pindah ke barisan sebelah kanan (wrap-around dari B4 ke B1) " +
+                    "sambil maju satu meja. Paling depan pindah ke paling belakang.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -310,7 +390,7 @@ fun App(prefs: SharedPreferences) {
         )
     }
 
-    // Konfirmasi reset
+    // Dialog konfirmasi reset
     if (showResetConfirm) {
         AlertDialog(
             onDismissRequest = { showResetConfirm = false },
@@ -326,6 +406,17 @@ fun App(prefs: SharedPreferences) {
                 TextButton(onClick = { showResetConfirm = false }) { Text("Batal") }
             },
         )
+    }
+
+    // Dialog hasil roll
+    if (showRollResult) {
+        rollResultSeats?.let { result ->
+            RollResultDialog(
+                seats = result,
+                period = period,
+                onDismiss = { showRollResult = false },
+            )
+        }
     }
 }
 
@@ -427,6 +518,85 @@ fun BulkDialog(onDismiss: () -> Unit, onApply: (String, Boolean) -> Unit) {
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Batal") }
+        },
+    )
+}
+
+@Composable
+fun RollResultDialog(seats: Seats, period: Int, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Hasil Periode $period") },
+        text = {
+            Column {
+                Text(
+                    "DEPAN KELAS",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Spacer(Modifier.width(18.dp))
+                    COLUMN_SIZES.indices.forEach { c ->
+                        Text(
+                            "B${c + 1}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                for (d in 0 until MAX_DEPTH) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "${d + 1}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.width(18.dp),
+                        )
+                        seats.forEachIndexed { c, col ->
+                            Box(
+                                Modifier.weight(1f).padding(horizontal = 2.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                if (d < col.size) {
+                                    val s = col[d]
+                                    val bg = if (s != null)
+                                        MaterialTheme.colorScheme.secondaryContainer
+                                    else
+                                        MaterialTheme.colorScheme.surfaceContainerHigh
+                                    Box(
+                                        modifier = Modifier
+                                            .aspectRatio(1f)
+                                            .background(bg, RoundedCornerShape(8.dp))
+                                            .padding(2.dp),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Text(
+                                            s?.nama ?: "",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) { Text("OK") }
         },
     )
 }

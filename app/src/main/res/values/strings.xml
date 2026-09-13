@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Tekajeduwa</string>
-    <string name="title_activity_main">Tekajeduwa</string>
+    <string name="app_name">Dashboard Kelas</string>
+    <string name="title_activity_main">Dashboard Kelas</string>
     <string name="package_name">com.tekajeduwa.app</string>
     <string name="custom_url_scheme">com.tekajeduwa.app</string>
 </resources>
