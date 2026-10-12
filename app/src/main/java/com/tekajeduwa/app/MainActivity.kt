@@ -108,18 +108,23 @@ class MainActivity : ComponentActivity() {
 fun App(prefs: SharedPreferences) {
     var seats by remember { mutableStateOf(loadSeats(prefs)) }
     var period by remember { mutableStateOf(prefs.getInt("period", 0)) }
+    var riwayat by remember { mutableStateOf(loadRiwayat(prefs)) }
     var editTarget by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var showBulk by remember { mutableStateOf(false) }
     var showResetConfirm by remember { mutableStateOf(false) }
     var showRollResult by remember { mutableStateOf(false) }
     var rollResultSeats by remember { mutableStateOf<Seats?>(null) }
+    var acakInfo by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var isShuffling by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     fun simpan(s: Seats, p: Int = period) {
+        // sekalian catat ke riwayat: siapa yang baru duduk di kursi mana
+        val r = catatRiwayat(s, riwayat)
         seats = s
         period = p
-        saveSeats(prefs, s, p)
+        riwayat = r
+        saveSeats(prefs, s, p, r)
     }
 
     Scaffold(
@@ -162,7 +167,9 @@ fun App(prefs: SharedPreferences) {
                             scope.launch {
                                 val names = seats.flatten().filterNotNull().map { it.nama }
                                 val startSeats = seats
-                                val endSeats = shuffleSeats(seats)
+                                val endSeats = shuffleSeats(seats, riwayat)
+                                val total = endSeats.flatten().count { it != null }
+                                val ulang = jumlahPengulang(riwayat, endSeats)
                                 // animasi pura-pura acak selama ~3 detik
                                 val totalFrames = 18
                                 val frameDelay = 170L // ~3 detik total
@@ -189,6 +196,7 @@ fun App(prefs: SharedPreferences) {
                                 }
                                 simpan(endSeats)
                                 isShuffling = false
+                                acakInfo = (total - ulang) to ulang
                             }
                         }
                     },
@@ -317,8 +325,11 @@ fun App(prefs: SharedPreferences) {
 
             Spacer(Modifier.height(10.dp))
             Text(
-                "Ketuk kursi untuk mengisi nama. Tiap periode semua siswa " +
-                    "pindah ke barisan sebelah kanan (wrap-around dari B4 ke B1) " +
+                "Ketuk kursi untuk mengisi nama. Tombol Acak membagi kursi " +
+                    "secara acak, tapi siswa tidak akan ditempatkan di kursi " +
+                    "yang pernah ia duduki selama masih ada kursi yang belum " +
+                    "pernah ia pakai. Tiap periode Rolling Periode memutar semua " +
+                    "siswa ke barisan sebelah kanan (wrap-around dari B4 ke B1) " +
                     "sambil maju satu meja. Paling depan pindah ke paling belakang.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -395,9 +406,11 @@ fun App(prefs: SharedPreferences) {
         AlertDialog(
             onDismissRequest = { showResetConfirm = false },
             title = { Text("Reset semua?") },
-            text = { Text("Semua nama siswa dan hitungan periode akan dihapus.") },
+            text = { Text("Semua nama siswa, hitungan periode, dan riwayat tempat duduk akan dihapus.") },
             confirmButton = {
                 Button(onClick = {
+                    // reset juga membuang riwayat, jadi semua kursi "baru" lagi
+                    riwayat = emptyRiwayat()
                     simpan(emptySeats(), 0)
                     showResetConfirm = false
                 }) { Text("Reset") }
@@ -406,6 +419,11 @@ fun App(prefs: SharedPreferences) {
                 TextButton(onClick = { showResetConfirm = false }) { Text("Batal") }
             },
         )
+    }
+
+    // Dialog hasil acak
+    acakInfo?.let { (baru, ulang) ->
+        AcakInfoDialog(baru, ulang) { acakInfo = null }
     }
 
     // Dialog hasil roll
@@ -474,6 +492,32 @@ fun SeatCell(siswa: Siswa?, onClick: () -> Unit) {
             )
         }
     }
+}
+
+@Composable
+fun AcakInfoDialog(baru: Int, ulang: Int, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Selesai Diacak") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(
+                    "$baru siswa dapat kursi yang belum pernah mereka duduki.",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                if (ulang > 0) {
+                    Text(
+                        "$ulang siswa terpaksa duduk di kursi yang sudah pernah " +
+                            "mereka duduki, karena semua kursi sudah pernah " +
+                            "mereka pakai.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        confirmButton = { Button(onClick = onDismiss) { Text("OK") } },
+    )
 }
 
 @Composable
