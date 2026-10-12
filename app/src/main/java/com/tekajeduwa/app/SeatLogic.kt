@@ -1,11 +1,18 @@
 package com.tekajeduwa.app
 
 import android.content.SharedPreferences
-import kotlin.math.abs
+import org.json.JSONArray
+import org.json.JSONObject
 
 // 4 barisan ke samping; barisan ke-3 punya 5 meja ke belakang
 val COLUMN_SIZES = listOf(4, 4, 5, 4)
 val MAX_DEPTH = COLUMN_SIZES.max()
+
+// Berapa periode terakhir kursi yang diingat per siswa. Tiap siswa dilarang
+// duduk di kursi yang pernah ia duduki dalam jangka waktu ini, jadi tempat
+// duduknya terus berganti dan hasilnya tetap acak -- bukan jadi deterministik
+// setelah semua kombinasi kursi habis.
+const val JENDELA_RIWAYAT = 8
 
 private val idCounter = java.util.concurrent.atomic.AtomicLong(1)
 
@@ -18,8 +25,9 @@ typealias Seats = List<List<Siswa?>>
 // Posisi kursi: kolom (B1..B4) to baris (meja 1 = paling depan)
 typealias Posisi = Pair<Int, Int>
 
-// Riwayat: tiap kursi menyimpan nama siswa yang pernah duduk di situ
-typealias Riwayat = Map<Posisi, Set<String>>
+// Riwayat: per nama siswa, daftar kursi yang pernah ia duduki,
+// urut dari yang paling lama ke paling baru
+typealias Riwayat = Map<String, List<Posisi>>
 
 fun emptySeats(): Seats = COLUMN_SIZES.map { n -> List(n) { null } }
 
@@ -34,80 +42,37 @@ fun semuaPosisi(): List<Posisi> = buildList {
     }
 }
 
-fun pernahDuduk(riwayat: Riwayat, pos: Posisi, nama: String): Boolean =
-    nama in (riwayat[pos] ?: emptySet())
+fun pernahDuduk(riwayat: Riwayat, nama: String, pos: Posisi): Boolean =
+    pos in (riwayat[nama] ?: emptyList())
 
-// Catat semua penghuni kursi sekarang ke riwayat, supaya periode berikutnya
-// siswa yang sama tidak ditempatkan lagi di kursi yang sama.
+// Catat semua penghuni kursi sekarang ke riwayat. Kursi yang sama tidak
+// dicatat dua kali berturut-turut (misal karena menyimpan data lain), dan
+// riwayat dibatasi JENDELA_RIWAYAT entri terakhir per siswa.
 fun catatRiwayat(seats: Seats, riwayat: Riwayat): Riwayat {
-    val hasil = HashMap(riwayat)
+    val hasil = riwayat.mapValues { it.value.toList() }.toMutableMap()
     seats.forEachIndexed { c, col ->
         col.forEachIndexed { d, s ->
             if (s != null) {
                 val pos = c to d
-                hasil[pos] = (hasil[pos] ?: emptySet()) + s.nama
+                val lama = hasil[s.nama] ?: emptyList()
+                if (lama.lastOrNull() != pos) {
+                    hasil[s.nama] = (lama + pos).takeLast(JENDELA_RIWAYAT)
+                }
             }
         }
     }
     return hasil
 }
 
-private fun nearestFree(
-    targetCol: Int,
-    targetDepth: Int,
-    occupied: Set<Posisi>,
-): Posisi {
-    var best: Posisi? = null
-    var bestDist = Int.MAX_VALUE
-    for (c in COLUMN_SIZES.indices) {
-        for (d in 0 until COLUMN_SIZES[c]) {
-            if (c to d in occupied) continue
-            val dist = abs(c - targetCol) + abs(d - targetDepth)
-            if (dist < bestDist) {
-                bestDist = dist
-                best = c to d
-            }
-        }
-    }
-    return best ?: (targetCol to targetDepth)
-}
-
-fun rollSeats(prev: Seats): Seats {
-    val occupied = mutableSetOf<Posisi>()
-    val placed = emptySeats().map { it.toMutableList() }
-
-    data class Mover(val s: Siswa, val c: Int, val d: Int)
-
-    val movers = buildList {
-        prev.forEachIndexed { c, col ->
-            col.forEachIndexed { d, s ->
-                if (s != null) add(Mover(s, c, d))
-            }
-        }
-    }.sortedWith(compareBy({ it.d }, { it.c }))
-
-    val numCols = COLUMN_SIZES.size
-
-    for (m in movers) {
-        // selalu ke barisan sebelah kanan, wrap-around dari B4 balik ke B1
-        val t = (m.c + 1) % numCols
-        // paling depan pindah ke paling belakang, lainnya maju satu meja
-        var nd = if (m.d == 0) COLUMN_SIZES[t] - 1 else m.d - 1
-        if (nd >= COLUMN_SIZES[t]) nd = COLUMN_SIZES[t] - 1
-
-        val target =
-            if (t to nd in occupied) nearestFree(t, nd, occupied) else (t to nd)
-        occupied.add(target)
-        placed[target.first][target.second] = m.s
-    }
-    return placed
-}
-
 // Acak tempat duduk tanpa mengulang: tiap siswa hanya boleh duduk di kursi
-// yang belum pernah ia duduki. Padanan siswa-kursi dicari dengan algoritma
-// Kuhn (pasangan maksimum) berurutan acak, jadi kalau ada padanan valid pasti
-// ketemu, dan hasilnya tetap acak. Siswa yang padanannya habis (semua kursi
-// sudah pernah ia duduki) ditempatkan di kursi sisa secara acak.
+// yang belum pernah ia duduki dalam jendela riwayatnya. Kursi yang sedang
+// terisi sekarang pun dihitung sudah pernah diduduki, jadi siswa tidak pernah
+// balik ke kursinya sendiri walau riwayat di prefs masih kosong.
+//
+// Padanan siswa-kursi dicari dengan algoritma Kuhn (pasangan maksimum)
+// berurutan acak: kalau ada padanan valid pasti ketemu, dan hasilnya acak.
+// Kalau jendela riwayat membuat padanan valid mustahil (papan kecil),
+// riwayat paling lama siswa yang belum kebagian dilupakan lalu dicari lagi.
 fun shuffleSeats(prev: Seats, riwayat: Riwayat): Seats {
     val posisi = mutableListOf<Posisi>()
     prev.forEachIndexed { c, col ->
@@ -118,27 +83,51 @@ fun shuffleSeats(prev: Seats, riwayat: Riwayat): Seats {
 
     val nama = posisi.map { prev[it.first][it.second]!!.nama }
 
-    // kandidat kursi valid buat tiap siswa; urutannya diacak biar hasil random
-    val kandidat = nama.map { namaSiswa ->
-        posisi.indices.filter { v -> !pernahDuduk(riwayat, posisi[v], namaSiswa) }.shuffled()
+    // riwayat efektif: yang sudah tersimpan + kursi yang sedang terisi sekarang
+    var riwayatKini = catatRiwayat(prev, riwayat)
+
+    // papan kecil: sisakan minimal 2 kursi bebas per siswa supaya tetap acak
+    val jendela = JENDELA_RIWAYAT.coerceAtMost((n - 2).coerceAtLeast(1))
+
+    fun kandidatSiswa(namaSiswa: String, riwayatEff: Riwayat): List<Int> {
+        val terlarang = (riwayatEff[namaSiswa] ?: emptyList()).takeLast(jendela).toSet()
+        return posisi.indices.filter { v -> posisi[v] !in terlarang }
     }
 
     // kursiKeSiswa[v] = indeks siswa yang duduk di kursi v (-1 kalau belum ada)
     val kursiKeSiswa = IntArray(n) { -1 }
+    val siswaDuduk = IntArray(n) { -1 }
 
-    fun pasang(u: Int, sudah: BooleanArray): Boolean {
-        for (v in kandidat[u]) {
-            if (sudah[v]) continue
-            sudah[v] = true
-            if (kursiKeSiswa[v] == -1 || pasang(kursiKeSiswa[v], sudah)) {
-                kursiKeSiswa[v] = u
-                return true
+    var coba = 0
+    while (coba++ <= n) {
+        val kandidat = nama.map { kandidatSiswa(it, riwayatKini).shuffled() }
+
+        kursiKeSiswa.fill(-1)
+        siswaDuduk.fill(-1)
+
+        fun pasang(u: Int, sudah: BooleanArray): Boolean {
+            for (v in kandidat[u]) {
+                if (sudah[v]) continue
+                sudah[v] = true
+                if (kursiKeSiswa[v] == -1 || pasang(kursiKeSiswa[v], sudah)) {
+                    kursiKeSiswa[v] = u
+                    siswaDuduk[u] = v
+                    return true
+                }
             }
+            return false
         }
-        return false
-    }
 
-    for (u in nama.indices.shuffled()) pasang(u, BooleanArray(n))
+        for (u in nama.indices.shuffled()) pasang(u, BooleanArray(n))
+
+        if (siswaDuduk.none { it == -1 }) break
+
+        // siswa yang kursinya sudah habis -> lupakan riwayat paling lamanya
+        val belum = siswaDuduk.indices.first { siswaDuduk[it] == -1 }
+        val riwayatSiswa = riwayatKini[nama[belum]] ?: break
+        if (riwayatSiswa.isEmpty()) break
+        riwayatKini = riwayatKini + (nama[belum] to riwayatSiswa.drop(1))
+    }
 
     val hasil: Array<Posisi?> = arrayOfNulls(n)
     val terpakai = BooleanArray(n)
@@ -150,7 +139,7 @@ fun shuffleSeats(prev: Seats, riwayat: Riwayat): Seats {
         }
     }
 
-    // siswa yang nggak dapat kursi baru -> kursi yang tersisa, acak
+    // siswa yang masih nggak kebagian -> kursi yang tersisa, acak
     val sisa = posisi.indices.filter { !terpakai[it] }.shuffled().iterator()
     for (u in nama.indices.shuffled()) {
         if (hasil[u] == null) hasil[u] = posisi[sisa.next()]
@@ -171,7 +160,7 @@ fun jumlahPengulang(riwayat: Riwayat, hasil: Seats): Int {
     var ulang = 0
     hasil.forEachIndexed { c, col ->
         col.forEachIndexed { d, s ->
-            if (s != null && pernahDuduk(riwayat, c to d, s.nama)) ulang++
+            if (s != null && pernahDuduk(riwayat, s.nama, c to d)) ulang++
         }
     }
     return ulang
@@ -199,20 +188,36 @@ fun loadSeats(prefs: SharedPreferences): Seats =
         }
     }
 
-fun loadRiwayat(prefs: SharedPreferences): Riwayat = buildMap {
-    for ((c, n) in COLUMN_SIZES.withIndex()) {
-        for (d in 0 until n) {
-            prefs.getStringSet(histKey(c to d), null)
-                ?.takeIf { it.isNotEmpty() }
-                // salinan, soalnya SharedPreferences nggak boleh dimodifikasi
-                ?.let { put(c to d, it.toSet()) }
+// Riwayat disimpan sebagai satu JSON: {"nama":[[kolom,baris], ...], ...}
+private const val KEY_RIWAYAT = "riwayat_kursi"
+
+fun loadRiwayat(prefs: SharedPreferences): Riwayat {
+    val teks = prefs.getString(KEY_RIWAYAT, null) ?: return emptyRiwayat()
+    return runCatching {
+        val obj = JSONObject(teks)
+        buildMap {
+            for (nama in obj.keys()) {
+                val arr = obj.optJSONArray(nama) ?: continue
+                val daftar = buildList {
+                    for (i in 0 until arr.length()) {
+                        val pair = arr.optJSONArray(i) ?: continue
+                        if (pair.length() >= 2) add(pair.getInt(0) to pair.getInt(1))
+                    }
+                }
+                if (daftar.isNotEmpty()) put(nama, daftar)
+            }
         }
-    }
+    }.getOrElse { emptyRiwayat() }
 }
 
-private fun histKey(pos: Posisi) = "hist_${pos.first}_${pos.second}"
-
 fun saveSeats(prefs: SharedPreferences, seats: Seats, period: Int, riwayat: Riwayat) {
+    val obj = JSONObject()
+    riwayat.forEach { (nama, posisi) ->
+        if (posisi.isEmpty()) return@forEach
+        val arr = JSONArray()
+        posisi.forEach { arr.put(JSONArray().put(it.first).put(it.second)) }
+        obj.put(nama, arr)
+    }
     prefs.edit().apply {
         clear()
         seats.forEachIndexed { c, col ->
@@ -220,9 +225,7 @@ fun saveSeats(prefs: SharedPreferences, seats: Seats, period: Int, riwayat: Riwa
                 if (s != null) putString("k${c}d${d}", s.nama)
             }
         }
-        riwayat.forEach { (pos, nama) ->
-            if (nama.isNotEmpty()) putStringSet(histKey(pos), HashSet(nama))
-        }
+        putString(KEY_RIWAYAT, obj.toString())
         putInt("period", period)
         apply()
     }
