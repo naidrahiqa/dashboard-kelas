@@ -388,6 +388,8 @@ fun App(prefs: SharedPreferences) {
                 modifier = Modifier.padding(horizontal = 6.dp),
             )
             Spacer(Modifier.height(16.dp))
+            BuildStamp()
+            Spacer(Modifier.height(16.dp))
         }
     }
 
@@ -846,9 +848,22 @@ fun MbgContent(
         }
 
         Spacer(Modifier.height(16.dp))
+        BuildStamp()
+        Spacer(Modifier.height(16.dp))
     }
 }
 
+// Penanda waktu build, buat memastikan app di HP versi terbaru
+@Composable
+fun BuildStamp() {
+    Text(
+        "Build ${BuildConfig.BUILD_INFO}",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
 // Warna status dipakai kartu ringkasan & chip di daftar
 @Composable
 private fun warnaStatus(status: StatusMbg): Pair<androidx.compose.ui.graphics.Color, androidx.compose.ui.graphics.Color> =

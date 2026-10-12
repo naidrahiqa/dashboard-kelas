@@ -25,7 +25,15 @@ android {
 
     buildFeatures {
         compose true
+        buildConfig true
     }
+
+    // Nama waktu build, biar kelihatan app versi mana yang lagi jalan di HP
+    buildConfigField(
+        "String",
+        "BUILD_INFO",
+        "\"${new Date().format('yyyy-MM-dd HH:mm', TimeZone.getTimeZone('Asia/Jakarta'))}\""
+    )
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
