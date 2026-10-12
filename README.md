@@ -1,6 +1,6 @@
-# Dashboard Kelas (Tekajeduwa)
+# MyKelasNich
 
-An Android classroom seat-arrangement dashboard built with **Kotlin + Jetpack Compose (Material 3)**. Set up the class layout once, then rotate or reshuffle seats each period with a single tap. The Gradle project is named **Tekajeduwa** (`rootProject.name` in `settings.gradle`); the app's launcher label is *Dashboard Kelas* (`com.tekajeduwa.app`).
+An Android classroom seat-arrangement dashboard built with **Kotlin + Jetpack Compose (Material 3)**. Set up the class layout once, then rotate or reshuffle seats each period with a single tap. The Gradle project is named **Tekajeduwa** (`rootProject.name` in `settings.gradle`); the app's launcher label is *MyKelasNich* (`com.tekajeduwa.app`).
 
 ## Features
 
@@ -35,7 +35,7 @@ The **Build & Release** workflow ([`.github/workflows/build.yml`](.github/workfl
 | Trigger | Result |
 | ------- | ------ |
 | Push to `main` | Builds a debug APK, uploads it as an artifact, and refreshes the rolling `latest` release (`Build Terbaru`) |
-| Tag `v*` | Builds the APK as `DashboardKelas-<tag>.apk` and creates a GitHub Release with generated notes |
+| Tag `v*` | Builds the APK as `MyKelasNich-<tag>.apk` and creates a GitHub Release with generated notes |
 | `workflow_dispatch` | Manual build (artifact only) |
 
 Steps: checkout → JDK 21 (Temurin) → Gradle setup → `./gradlew assembleDebug --no-daemon` → copy APK to `dist/` → upload artifact → release step.

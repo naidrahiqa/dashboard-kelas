@@ -151,7 +151,7 @@ fun App(prefs: SharedPreferences) {
         topBar = {
             TopAppBar(
                 title = {
-                    Text(if (tampilan == Tampilan.KURSI) "Dashboard Kelas" else "Daftar MBG")
+                    Text(if (tampilan == Tampilan.KURSI) "MyKelasNich" else "Daftar MBG")
                 },
                 actions = {
                     if (tampilan == Tampilan.KURSI) {
